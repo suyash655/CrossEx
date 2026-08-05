@@ -8,3 +8,6 @@ __pycache__/
 data/samples/audio/*.wav
 data/samples/audio/*.mp3
 !data/samples/audio/.gitkeep
+!data/samples/audio/caraccident.mp3
+!data/samples/audio/contractdispute.mp3
+!data/samples/audio/workplaceincident.mp3

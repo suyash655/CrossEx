@@ -1,5 +1,7 @@
 streamlit
-google-generativeai
+google-genai
 python-dotenv
 audio-recorder-streamlit
 pydantic
+mutagen
+groq

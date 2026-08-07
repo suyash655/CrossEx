@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 
 load_dotenv(dotenv_path=_PROJECT_ROOT / ".env", override=True)
 
+from src.ui_theme import inject_custom_css
 from src.orchestrator import CrossExamSession
 from src.nodes.transcriber import transcribe_audio, AudioTranscriptionError
 from src.nodes.scorecard import generate_scorecard, ScorecardError
@@ -24,6 +25,7 @@ st.set_page_config(
     page_icon="⚖️",
     layout="wide",
 )
+inject_custom_css()
 
 MAX_ROUNDS = 4
 

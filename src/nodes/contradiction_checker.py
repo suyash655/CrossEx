@@ -30,19 +30,29 @@ You will be given:
 - The witness's answer to that question.
 
 Your tasks:
-1. Determine whether the answer CONTRADICTS, WEAKENS, or is EVASIVE about the targeted claim,
-   OR reveals a NEW inconsistency with any other claim in the list.
-   - "contradiction_found" should be true if any of these apply.
-2. Write a clear, plain-language explanation of your reasoning (2-4 sentences).
-   If no contradiction was found, explain why the answer was consistent.
-3. Return an updated_claims list — same claims with the same IDs — but refresh the
-   "potential_weakness" field for the targeted claim to reflect what was just revealed.
+1. Determine the result using STRICT criteria:
+   - Set "contradiction_found": true ONLY if the answer:
+     (a) directly contradicts a specific fact in one of the claims (e.g. says X when claim says not-X), OR
+     (b) reveals new information that makes a prior claim demonstrably false or misleading.
+   - Set "contradiction_found": false if the answer is merely:
+     - evasive, vague, or off-topic (note this in the explanation instead)
+     - incomplete or lacking detail
+     - unconfirmed but not falsified
+   Do NOT set contradiction_found: true just because the answer is unhelpful or evasive.
+
+2. Write a precise, plain-language explanation (2-4 sentences):
+   - If contradiction_found is true: name the specific claim and the specific fact that was contradicted.
+   - If contradiction_found is false: state clearly whether the answer was consistent, evasive, or
+     simply unhelpful, and why no contradiction was established.
+
+3. Return an updated_claims list — same claims, same IDs — refreshing the "potential_weakness"
+   field ONLY for the targeted claim based on what was just revealed.
    Leave all other claims unchanged.
 
 Return ONLY a valid JSON object — no markdown, no commentary — matching this exact schema:
 {
   "contradiction_found": true or false,
-  "explanation": "<plain-language reasoning>",
+  "explanation": "<precise plain-language reasoning>",
   "updated_claims": [
     {
       "id": "<same id>",

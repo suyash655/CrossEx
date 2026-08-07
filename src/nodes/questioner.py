@@ -27,10 +27,15 @@ You have been given a list of factual claims made by a witness, each annotated w
 You also have the full history of questions already asked and the witness's answers.
 
 Your task:
-1. Identify the claim that has NOT yet been targeted (check "targets_claim_id" in the history).
-   Among untargeted claims, choose the one whose "potential_weakness" is most exploitable.
+1. From the UNTARGETED claims, select the ONE whose weakness is most damaging to the witness's credibility
+   if exposed. Prefer weaknesses involving:
+   - Missing corroboration or documentation (hardest for the witness to defend)
+   - Causal links that could be disputed
+   - Facts that contradict common knowledge or procedure
+   Over weaknesses that are merely vague timing or imprecise language (softer targets).
 2. Formulate ONE single, direct, natural-sounding spoken question that probes that weakness.
-   The question must sound like a real courtroom question — sharp, concise, with no preamble.
+   The question must sound like a real courtroom question — sharp, concise, specific.
+   Do NOT ask about definitions or margins of error unless the timing directly contradicts something.
    Do NOT say "I would ask..." or add any meta-commentary. Just the question itself.
 3. Return ONLY a valid JSON object — no markdown, no commentary — matching this exact schema:
 {

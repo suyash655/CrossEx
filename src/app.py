@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 load_dotenv(dotenv_path=_PROJECT_ROOT / ".env", override=True)
 
 from src.ui_theme import inject_custom_css
-from src.ui_components import render_domain_selector
+from src.ui_components import render_domain_selector, render_tension_meter
 from src.orchestrator import CrossExamSession
 from src.nodes.transcriber import transcribe_audio, AudioTranscriptionError
 from src.nodes.scorecard import generate_scorecard, ScorecardError
@@ -42,6 +42,7 @@ def _init_state() -> None:
         "round_number": 0,
         "statement_text": "",
         "selected_domain": None,   # domain key chosen on the selector screen
+        "contradiction_count": 0,  # cumulative contradictions found this session
         "error": None,
     }
     for k, v in defaults.items():
@@ -229,6 +230,12 @@ def _phase_input() -> None:
 # ── Phase: questioning ────────────────────────────────────────────────────────
 def _phase_questioning() -> None:
     _render_progress()
+
+    # Tension meter — sits directly below the round progress bar
+    render_tension_meter(
+        contradiction_count=st.session_state.contradiction_count,
+        total_rounds=MAX_ROUNDS,
+    )
     st.divider()
 
     session: CrossExamSession = st.session_state.session
@@ -299,6 +306,9 @@ def _phase_questioning() -> None:
 
                 st.session_state.last_cr = cr
 
+                if cr.contradiction_found:
+                    st.session_state.contradiction_count += 1
+
                 if result["done"]:
                     st.session_state.phase = "scorecard_ready"
                 else:
@@ -314,6 +324,10 @@ def _phase_questioning() -> None:
 # ── Phase: scorecard_ready ────────────────────────────────────────────────────
 def _phase_scorecard_ready() -> None:
     _render_progress()
+    render_tension_meter(
+        contradiction_count=st.session_state.contradiction_count,
+        total_rounds=MAX_ROUNDS,
+    )
     st.divider()
 
     # Show final contradiction result

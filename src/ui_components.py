@@ -95,3 +95,99 @@ def render_domain_selector() -> None:
 
             # Show description below the card as caption for readability
             st.caption(cfg["description"])
+
+
+def render_tension_meter(contradiction_count: int, total_rounds: int) -> None:
+    """
+    Render a horizontal animated pressure-gauge bar showing how much
+    tension has accumulated during the session.
+
+    The fill percentage = contradiction_count / total_rounds, capped at 100%.
+    The bar uses the red accent color (#B91C1C) and animates smoothly via
+    a CSS transition when the value changes between reruns.
+
+    Args:
+        contradiction_count: Number of contradictions found so far.
+        total_rounds:        Total rounds in the session (used as denominator).
+    """
+    # Guard against division by zero
+    if total_rounds <= 0:
+        total_rounds = 1
+
+    pct = min(int(round(contradiction_count / total_rounds * 100)), 100)
+
+    # Color shifts from muted red → bright red → deep crimson as tension rises
+    if pct == 0:
+        fill_color = "#3d0a0a"          # dark, almost invisible
+        glow = "none"
+    elif pct <= 25:
+        fill_color = "#7f1d1d"
+        glow = "0 0 6px rgba(185,28,28,0.3)"
+    elif pct <= 50:
+        fill_color = "#B91C1C"
+        glow = "0 0 10px rgba(185,28,28,0.55)"
+    elif pct <= 75:
+        fill_color = "#dc2626"
+        glow = "0 0 14px rgba(220,38,38,0.65)"
+    else:
+        fill_color = "#ef4444"          # hottest red at full tension
+        glow = "0 0 20px rgba(239,68,68,0.80)"
+
+    # Unique element ID so the CSS transition targets the right bar
+    # (important when the component is rendered multiple times per session)
+    bar_id = "crossex-tension-bar"
+
+    st.markdown(
+        f"""
+        <style>
+        #{bar_id}-track {{
+            background: #1a1a1a;
+            border: 1px solid #2a0a0a;
+            border-radius: 2px;
+            height: 14px;
+            width: 100%;
+            overflow: hidden;
+            position: relative;
+        }}
+        #{bar_id}-fill {{
+            height: 100%;
+            width: {pct}%;
+            background-color: {fill_color};
+            box-shadow: {glow};
+            border-radius: 1px;
+            transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1),
+                        background-color 0.6s ease,
+                        box-shadow 0.6s ease;
+        }}
+        .crossex-tension-label {{
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 4px;
+        }}
+        .crossex-tension-title {{
+            font-family: "Courier New", monospace;
+            font-size: 0.7rem;
+            font-variant: small-caps;
+            letter-spacing: 0.18em;
+            color: #888888;
+        }}
+        .crossex-tension-pct {{
+            font-family: "Courier New", monospace;
+            font-size: 0.75rem;
+            color: {fill_color if pct > 0 else "#444"};
+            font-weight: bold;
+            transition: color 0.6s ease;
+        }}
+        </style>
+
+        <div class="crossex-tension-label">
+            <span class="crossex-tension-title">tension</span>
+            <span class="crossex-tension-pct">{pct}%</span>
+        </div>
+        <div id="{bar_id}-track">
+            <div id="{bar_id}-fill"></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )

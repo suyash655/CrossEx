@@ -18,12 +18,15 @@ from src.schemas import ClaimExtractionResult
 
 load_dotenv(dotenv_path=_PROJECT_ROOT / ".env", override=True)
 
+from src.domains import DOMAINS
+
 # ---------------------------------------------------------------------------
-# Prompts
+# Prompt templates
 # ---------------------------------------------------------------------------
 
-_SYSTEM_PROMPT = """You are an experienced legal analyst and cross-examination specialist.
-Your task is to read a witness statement and decompose it into every distinct factual claim it contains.
+_SYSTEM_PROMPT_TEMPLATE = """{persona_prompt}
+
+Your task is to read the provided statement and decompose it into every distinct factual claim it contains.
 
 For each claim you must:
 1. Assign a short unique id (e.g. "c1", "c2", ...).
@@ -37,17 +40,17 @@ For each claim you must:
    (field: "potential_weakness")
 
 Return ONLY a valid JSON object — no markdown, no commentary — matching this exact schema:
-{
+{{
   "claims": [
-    {
+    {{
       "id": "c1",
       "statement": "<the factual claim>",
       "potential_weakness": "<the weakness or ambiguity>"
-    }
+    }}
   ]
-}"""
+}}"""
 
-_USER_TEMPLATE = "Witness statement:\n\n{statement}"
+_USER_TEMPLATE = "Statement:\n\n{statement}"
 
 
 # ---------------------------------------------------------------------------
@@ -94,31 +97,41 @@ def _parse_json_response(raw: str) -> dict:
 # Main node function
 # ---------------------------------------------------------------------------
 
-def extract_claims(statement: str) -> ClaimExtractionResult:
+def extract_claims(statement: str, domain: str = "legal") -> ClaimExtractionResult:
     """
-    Extract distinct factual claims from a witness statement using Gemini
-    2.0 Flash acting as a legal analyst.
+    Extract distinct factual claims from a statement using Groq Llama,
+    with the adversarial persona shaped by the specified domain.
 
     Each claim is returned with a unique id, a clear statement, and an
     identified potential weakness or ambiguity for the questioner to target.
 
     Args:
-        statement: Plain-text witness statement (e.g. from TranscriptionResult).
+        statement: Plain-text statement (e.g. from TranscriptionResult).
+        domain:    Domain key from DOMAINS (default: "legal"). Controls the
+                   persona and framing used during extraction.
 
     Returns:
-        ClaimExtractionResult containing a list of Claim objects.
+        ClaimExtractionResult containing a list of Claim objects and the domain.
 
     Raises:
-        ClaimExtractionError: If the statement is empty, the API call fails,
-            the response is malformed JSON, or validation fails.
+        ClaimExtractionError: If the statement is empty, domain is unknown,
+            the API call fails, the response is malformed JSON, or validation fails.
     """
     # --- 1. Input validation -------------------------------------------------
     if not statement or not statement.strip():
         raise ClaimExtractionError(
-            "Statement is empty. Provide a non-empty witness statement."
+            "Statement is empty. Provide a non-empty statement."
+        )
+    if domain not in DOMAINS:
+        raise ClaimExtractionError(
+            f"Unknown domain '{domain}'. Valid domains: {', '.join(DOMAINS)}."
         )
 
-    # --- 2. Configure Groq client -------------------------------------------
+    # --- 2. Build domain-aware system prompt ---------------------------------
+    persona = DOMAINS[domain]["persona_prompt"]
+    system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(persona_prompt=persona)
+
+    # --- 3. Configure Groq client -------------------------------------------
     api_key = os.getenv("GROQ_API_KEY") or os.getenv("GRoQ_API_KEY")
     if not api_key:
         raise ClaimExtractionError(
@@ -127,12 +140,12 @@ def extract_claims(statement: str) -> ClaimExtractionResult:
         )
     client = Groq(api_key=api_key)
 
-    # --- 3. Call Groq --------------------------------------------------------
+    # --- 4. Call Groq --------------------------------------------------------
     try:
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": _USER_TEMPLATE.format(statement=statement.strip())},
             ],
             temperature=0.2,
@@ -146,18 +159,19 @@ def extract_claims(statement: str) -> ClaimExtractionResult:
     raw = (response.choices[0].message.content or "").strip()
     if not raw:
         raise ClaimExtractionError(
-            "Gemini returned an empty response. "
+            "Groq returned an empty response. "
             "The statement may be too short or contain no extractable claims."
         )
 
     data = _parse_json_response(raw)
 
-    # --- 5. Validate against schema ------------------------------------------
+    # --- 5. Inject domain and validate against schema ------------------------
+    data["domain"] = domain
     try:
         result = ClaimExtractionResult(**data)
     except Exception as exc:
         raise ClaimExtractionError(
-            f"Gemini response did not match the expected schema: {exc}\n"
+            f"Groq response did not match the expected schema: {exc}\n"
             f"Parsed data: {data}"
         ) from exc
 

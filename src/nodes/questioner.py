@@ -18,30 +18,33 @@ from src.schemas import Claim, ClaimExtractionResult, QuestionResult
 
 load_dotenv(dotenv_path=_PROJECT_ROOT / ".env", override=True)
 
+from src.domains import DOMAINS
+
 # ---------------------------------------------------------------------------
-# Prompts
+# Prompt templates
 # ---------------------------------------------------------------------------
 
-_SYSTEM_PROMPT = """You are a sharp, skeptical opposing counsel conducting a cross-examination.
-You have been given a list of factual claims made by a witness, each annotated with its potential weakness.
-You also have the full history of questions already asked and the witness's answers.
+_SYSTEM_PROMPT_TEMPLATE = """{persona_prompt}
+
+You have been given a list of factual claims, each annotated with its potential weakness.
+You also have the full history of questions already asked and the answers given.
 
 Your task:
-1. From the UNTARGETED claims, select the ONE whose weakness is most damaging to the witness's credibility
-   if exposed. Prefer weaknesses involving:
-   - Missing corroboration or documentation (hardest for the witness to defend)
+1. From the UNTARGETED claims, select the ONE whose weakness is most damaging to the
+   respondent's credibility if exposed. Prefer weaknesses involving:
+   - Missing corroboration or documentation (hardest to defend)
    - Causal links that could be disputed
    - Facts that contradict common knowledge or procedure
    Over weaknesses that are merely vague timing or imprecise language (softer targets).
 2. Formulate ONE single, direct, natural-sounding spoken question that probes that weakness.
-   The question must sound like a real courtroom question — sharp, concise, specific.
-   Do NOT ask about definitions or margins of error unless the timing directly contradicts something.
-   Do NOT say "I would ask..." or add any meta-commentary. Just the question itself.
+   The question must be sharp, concise, and specific — consistent with the persona above.
+   Do NOT ask about definitions or margins of error unless a timing claim directly contradicts
+   something else. Do NOT say "I would ask..." or add meta-commentary. Just the question itself.
 3. Return ONLY a valid JSON object — no markdown, no commentary — matching this exact schema:
-{
+{{
   "question": "<the spoken question>",
   "targets_claim_id": "<id of the claim being targeted>"
-}"""
+}}"""
 
 _USER_TEMPLATE = """\
 Claims:
@@ -123,26 +126,25 @@ def _parse_json_response(raw: str, error_class: type) -> dict:
 def generate_question(
     claims: ClaimExtractionResult,
     history: list[dict],
+    domain: str = "legal",
 ) -> QuestionResult:
     """
-    Generate the next adversarial cross-examination question targeting the
-    most exploitable untested claim.
-
-    The function inspects the history to determine which claim IDs have
-    already been targeted, then instructs Gemini to pick the best remaining
-    claim and craft a single sharp spoken question.
+    Generate the next adversarial question targeting the most exploitable
+    untested claim, with tone shaped by the specified domain persona.
 
     Args:
         claims:  ClaimExtractionResult from Node 1 (the full claims list).
         history: List of dicts with keys "question", "answer", and optionally
                  "targets_claim_id" from previous rounds.
+        domain:  Domain key from DOMAINS (default: "legal"). Controls the
+                 adversarial persona and question style.
 
     Returns:
         QuestionResult with the next question and the claim ID it targets.
 
     Raises:
-        QuestionGenerationError: If all claims are already targeted, the API
-            call fails, the response is malformed, or schema validation fails.
+        QuestionGenerationError: If all claims are targeted, domain unknown,
+            the API call fails, response is malformed, or validation fails.
     """
     # --- 1. Check there are untargeted claims remaining ----------------------
     already_targeted = _already_targeted_ids(history)
@@ -154,7 +156,16 @@ def generate_question(
             "No new question can be generated."
         )
 
-    # --- 2. Configure Groq client --------------------------------------------
+    if domain not in DOMAINS:
+        raise QuestionGenerationError(
+            f"Unknown domain '{domain}'. Valid domains: {', '.join(DOMAINS)}."
+        )
+
+    # --- 2. Build domain-aware system prompt ---------------------------------
+    persona = DOMAINS[domain]["persona_prompt"]
+    system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(persona_prompt=persona)
+
+    # --- 3. Configure Groq client --------------------------------------------
     api_key = os.getenv("GROQ_API_KEY") or os.getenv("GRoQ_API_KEY")
     if not api_key:
         raise QuestionGenerationError(
@@ -186,7 +197,7 @@ def generate_question(
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message},
             ],
             temperature=0.4,

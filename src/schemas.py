@@ -39,6 +39,10 @@ class ClaimExtractionResult(BaseModel):
     claims: list[Claim] = Field(
         ..., min_length=1, description="List of claims extracted from the transcript."
     )
+    domain: str = Field(
+        default="legal",
+        description="The domain this extraction was performed under (e.g. 'legal', 'debate').",
+    )
 
 
 class QuestionResult(BaseModel):

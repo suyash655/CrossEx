@@ -47,14 +47,22 @@ class CrossExamSession:
         Total number of cross-examination rounds (default: 4).
     """
 
-    def __init__(self, max_rounds: int = 4) -> None:
-        """Initialise an empty session with no state."""
+    def __init__(self, max_rounds: int = 4, domain: str = "legal") -> None:
+        """
+        Initialise an empty session with no state.
+
+        Args:
+            max_rounds: Total number of cross-examination rounds (default: 4).
+            domain:     Domain key from DOMAINS controlling the adversarial
+                        persona used throughout the session (default: "legal").
+        """
         self.statement: str | None = None
         self.claims: ClaimExtractionResult | None = None
         self.current_question: QuestionResult | None = None
         self.history: list[dict] = []
         self.round_number: int = 0
         self.max_rounds: int = max_rounds
+        self.domain: str = domain
 
     # ------------------------------------------------------------------
     # Public API
@@ -79,8 +87,8 @@ class CrossExamSession:
             QuestionGenerationError: If question generation fails.
         """
         self.statement = statement_transcript
-        self.claims = extract_claims(statement_transcript)
-        self.current_question = generate_question(self.claims, history=[])
+        self.claims = extract_claims(statement_transcript, domain=self.domain)
+        self.current_question = generate_question(self.claims, history=[], domain=self.domain)
         self.round_number = 1
         return self.current_question
 
@@ -124,7 +132,10 @@ class CrossExamSession:
         )
 
         # --- Update claims with refreshed weaknesses -------------------------
-        self.claims = ClaimExtractionResult(claims=contradiction_result.updated_claims)
+        self.claims = ClaimExtractionResult(
+            claims=contradiction_result.updated_claims,
+            domain=self.domain,
+        )
 
         # --- Record this round in history ------------------------------------
         self.history.append({
@@ -148,6 +159,7 @@ class CrossExamSession:
         next_question: QuestionResult = generate_question(
             claims=self.claims,
             history=self.history,
+            domain=self.domain,
         )
         self.current_question = next_question
         self.round_number += 1

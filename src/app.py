@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 load_dotenv(dotenv_path=_PROJECT_ROOT / ".env", override=True)
 
 from src.ui_theme import inject_custom_css
+from src.ui_components import render_domain_selector
 from src.orchestrator import CrossExamSession
 from src.nodes.transcriber import transcribe_audio, AudioTranscriptionError
 from src.nodes.scorecard import generate_scorecard, ScorecardError
@@ -32,7 +33,7 @@ MAX_ROUNDS = 4
 # ── Session state bootstrap ──────────────────────────────────────────────────
 def _init_state() -> None:
     defaults = {
-        "phase": "input",          # input | questioning | scorecard
+        "phase": "input",          # input | questioning | scorecard_ready | scorecard
         "session": None,           # CrossExamSession instance
         "current_question": None,  # QuestionResult
         "last_cr": None,           # last ContradictionCheckResult
@@ -40,6 +41,7 @@ def _init_state() -> None:
         "history_display": [],     # list of {q, a, contradiction_found} for sidebar
         "round_number": 0,
         "statement_text": "",
+        "selected_domain": None,   # domain key chosen on the selector screen
         "error": None,
     }
     for k, v in defaults.items():
@@ -127,6 +129,20 @@ def _render_sidebar() -> None:
         st.caption("Cross-Examination Trainer")
         st.divider()
 
+        # Show selected domain badge
+        domain_key = st.session_state.get("selected_domain")
+        if domain_key:
+            from src.domains import DOMAINS
+            cfg = DOMAINS.get(domain_key, {})
+            st.markdown(
+                f'<div style="background:#1f0707;border:1px solid #B91C1C;'
+                f'border-radius:2px;padding:6px 10px;margin-bottom:8px;">'
+                f'<span style="font-family:Courier New,monospace;font-size:0.8rem;'
+                f'color:#E5E5E5;">{cfg.get("icon","")} {cfg.get("display_name","")}</span>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
         if st.session_state.statement_text:
             with st.expander("📋 Opening Statement", expanded=False):
                 st.write(st.session_state.statement_text)
@@ -162,12 +178,31 @@ def _render_progress() -> None:
 
 # ── Phase: input ──────────────────────────────────────────────────────────────
 def _phase_input() -> None:
-    st.title("⚖️ CrossEx — Cross-Examination Trainer")
+    st.title("⚖️ CrossEx — Adversarial Interview Simulator")
     st.markdown(
-        "Record, upload, or type the **witness's opening statement**. "
-        "CrossEx will extract claims and begin the cross-examination."
+        "Choose a domain, then provide the **opening statement** to be challenged."
     )
     st.divider()
+
+    # ── Step 1: domain selection ──────────────────────────────────────────
+    st.markdown("### Step 1 — Choose your domain")
+    render_domain_selector()
+
+    selected_domain = st.session_state.get("selected_domain")
+    if not selected_domain:
+        st.info("Select a domain above to continue.")
+        return   # gate: nothing below renders until a domain is chosen
+
+    st.divider()
+
+    # ── Step 2: statement input ───────────────────────────────────────────
+    from src.domains import DOMAINS
+    cfg = DOMAINS[selected_domain]
+    st.markdown(f"### Step 2 — Provide the opening statement")
+    st.caption(
+        f"{cfg['icon']} You selected **{cfg['display_name']}**. "
+        f"{cfg['description']}"
+    )
 
     transcript = _audio_input_widget("statement")
 
@@ -177,7 +212,10 @@ def _phase_input() -> None:
 
         with st.spinner("Analysing statement and generating first question…"):
             try:
-                session = CrossExamSession(max_rounds=MAX_ROUNDS)
+                session = CrossExamSession(
+                    max_rounds=MAX_ROUNDS,
+                    domain=selected_domain,
+                )
                 q = session.start(transcript)
                 st.session_state.session = session
                 st.session_state.current_question = q
@@ -215,21 +253,27 @@ def _phase_questioning() -> None:
         if targeted:
             st.caption(f"Targeting claim [{targeted.id}]: _{targeted.statement}_")
 
-    # The question
+    # The question — label uses domain persona name
+    from src.domains import DOMAINS
+    domain_key = st.session_state.get("selected_domain", "legal")
+    persona_label = DOMAINS.get(domain_key, {}).get("display_name", "OPPOSING COUNSEL").upper()
+
     st.markdown(
         f"""
         <div style="
-            background:#1a1a2e;
-            border-left:4px solid #e94560;
-            border-radius:6px;
+            background:#1a0505;
+            border-left:4px solid #B91C1C;
+            border-radius:2px;
             padding:18px 22px;
             margin-bottom:16px;
         ">
-            <p style="color:#aaa;font-size:0.8rem;margin:0 0 6px 0;">
-                OPPOSING COUNSEL — ROUND {rn}
+            <p style="color:#888;font-size:0.78rem;margin:0 0 6px 0;
+                      font-family:'Courier New',monospace;letter-spacing:0.08em;">
+                {persona_label} — ROUND {rn}
             </p>
-            <p style="color:#f0f0f0;font-size:1.15rem;margin:0;font-style:italic;">
-                "{q.question}"
+            <p style="color:#f0f0f0;font-size:1.1rem;margin:0;font-style:italic;
+                      font-family:'Georgia',serif;">
+                &ldquo;{q.question}&rdquo;
             </p>
         </div>
         """,

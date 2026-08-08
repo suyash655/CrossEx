@@ -99,6 +99,12 @@ def inject_custom_css() -> None:
             background-color: #991b1b !important;
             box-shadow: 0 0 14px 3px rgba(185, 28, 28, 0.7) !important;
         }
+        /* Icon-only buttons (like objection) */
+        .stButton > button:has(> span:only-child) {
+            padding: 0.4rem 0.6rem !important;
+            font-size: 1.1rem !important;
+            min-height: auto !important;
+        }
 
         /* ── Text inputs & text areas ───────────────────────────────── */
         .stTextInput > div > div > input,
@@ -109,6 +115,10 @@ def inject_custom_css() -> None:
             border-radius: 2px !important;
             font-family: "Courier New", monospace !important;
             font-size: 0.9rem !important;
+        }
+        .stTextInput > div > div > input::placeholder,
+        .stTextArea > div > div > textarea::placeholder {
+            color: #666666 !important;
         }
         .stTextInput > div > div > input:focus,
         .stTextArea > div > div > textarea:focus {
@@ -217,6 +227,13 @@ def inject_custom_css() -> None:
         [data-testid="stMetricDelta"] {
             font-family: "Courier New", monospace !important;
             font-size: 0.8rem !important;
+        }
+        /* Metric delta colors */
+        [data-testid="stMetricDelta"][data-color="normal"] {
+            color: #166534 !important;
+        }
+        [data-testid="stMetricDelta"][data-color="inverse"] {
+            color: #B91C1C !important;
         }
 
         /* ── Divider ────────────────────────────────────────────────── */

@@ -3,6 +3,7 @@
 import pathlib
 import sys
 import tempfile
+from datetime import datetime
 
 _PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(_PROJECT_ROOT) not in sys.path:
@@ -19,6 +20,7 @@ from src.ui_components import render_domain_selector, render_tension_meter
 from src.orchestrator import CrossExamSession
 from src.nodes.transcriber import transcribe_audio, AudioTranscriptionError
 from src.nodes.scorecard import generate_scorecard, ScorecardError
+from src.session_store import save_session, load_session_history
 
 # ── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -113,12 +115,17 @@ def _audio_input_widget(key_prefix: str) -> str | None:
             "Type or paste your statement here",
             key=f"{key_prefix}_text",
             height=120,
+            placeholder="Enter your statement here...",
         )
         if st.button("Use this text", key=f"{key_prefix}_use_text"):
             if text.strip():
                 return text.strip()
             else:
-                st.warning("Please enter some text first.")
+                st.markdown(
+                    '<div style="color:#b45309;font-family:Courier New,monospace;font-size:0.8rem;'
+                    'padding:4px 0;">Please enter some text first.</div>',
+                    unsafe_allow_html=True,
+                )
 
     return None
 
@@ -146,25 +153,127 @@ def _render_sidebar() -> None:
 
         if st.session_state.statement_text:
             with st.expander("📋 Opening Statement", expanded=False):
-                st.write(st.session_state.statement_text)
+                st.markdown(
+                    f'<div style="color:#E5E5E5;font-family:Courier New,monospace;'
+                    f'font-size:0.9rem;line-height:1.6;padding:4px 0;">'
+                    f'{st.session_state.statement_text}</div>',
+                    unsafe_allow_html=True,
+                )
 
         if st.session_state.history_display:
             st.subheader("📝 Interrogation Record")
             for i, entry in enumerate(st.session_state.history_display, 1):
-                contradiction_icon = "⚠️" if entry["contradiction_found"] else "✓"
+                if entry.get("flagged_unfair"):
+                    contradiction_icon = "⚡"
+                else:
+                    contradiction_icon = "⚠️" if entry["contradiction_found"] else "✓"
                 with st.expander(
                     f"Round {i} — {contradiction_icon}",
                     expanded=(i == len(st.session_state.history_display)),
                 ):
-                    st.markdown(f"**Q:** {entry['q']}")
-                    st.markdown(f"**A:** {entry['a']}")
-                    if entry["contradiction_found"]:
-                        st.error(f"Contradiction: {entry['explanation']}")
+                    st.markdown(
+                        f'<p style="color:#888;font-family:Courier New,monospace;font-size:0.75rem;'
+                        f'margin:0 0 4px 0;"><strong>Q:</strong></p>',
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(
+                        f'<p style="color:#E5E5E5;font-family:Courier New,monospace;font-size:0.85rem;'
+                        f'margin:0 0 8px 0;line-height:1.5;">{entry["q"]}</p>',
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(
+                        f'<p style="color:#888;font-family:Courier New,monospace;font-size:0.75rem;'
+                        f'margin:0 0 4px 0;"><strong>A:</strong></p>',
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(
+                        f'<p style="color:#E5E5E5;font-family:Courier New,monospace;font-size:0.85rem;'
+                        f'margin:0 0 12px 0;line-height:1.5;">{entry["a"]}</p>',
+                        unsafe_allow_html=True,
+                    )
+                    if entry.get("flagged_unfair"):
+                        st.markdown(
+                            '<div style="color:#b45309;font-family:Courier New,monospace;font-size:0.85rem;'
+                            'padding:8px 12px;background:#1f1700;border-left:3px solid #b45309;'
+                            'border-radius:2px;">Question flagged as unfair — won\'t count against score</div>',
+                            unsafe_allow_html=True,
+                        )
+                    elif entry["contradiction_found"]:
+                        st.markdown(
+                            f'<div style="color:#E5E5E5;font-family:Courier New,monospace;font-size:0.85rem;'
+                            f'padding:8px 12px;background:#2a0808;border-left:3px solid #B91C1C;'
+                            f'border-radius:2px;">Contradiction: {entry["explanation"]}</div>',
+                            unsafe_allow_html=True,
+                        )
                     else:
-                        st.success(f"Consistent: {entry['explanation']}")
+                        st.markdown(
+                            f'<div style="color:#E5E5E5;font-family:Courier New,monospace;font-size:0.85rem;'
+                            f'padding:8px 12px;background:#0a1f0a;border-left:3px solid #166534;'
+                            f'border-radius:2px;">Consistent: {entry["explanation"]}</div>',
+                            unsafe_allow_html=True,
+                        )
         else:
-            st.info("Questions and answers will appear here as the session progresses.")
+            st.markdown(
+                '<div style="color:#888;font-family:Courier New,monospace;font-size:0.8rem;'
+                'padding:4px 0;">Questions and answers will appear here as the session progresses.</div>',
+                unsafe_allow_html=True,
+            )
 
+        st.divider()
+        
+        # Past sessions history
+        past_sessions = load_session_history()
+        if past_sessions:
+            st.markdown("### 📚 Your Past Sessions")
+            from src.domains import DOMAINS
+            for session in reversed(past_sessions[-5:]):  # Show last 5 sessions
+                domain_key = session.get("domain", "legal")
+                domain_cfg = DOMAINS.get(domain_key, {})
+                domain_name = domain_cfg.get("display_name", domain_key).upper()
+                domain_icon = domain_cfg.get("icon", "⚖️")
+                
+                # Parse timestamp
+                try:
+                    ts = datetime.fromisoformat(session["timestamp"])
+                    date_str = ts.strftime("%b %d, %Y")
+                except:
+                    date_str = session["timestamp"][:10]
+                
+                consistency = session["final_scorecard"].get("consistency_score", "N/A")
+                
+                st.markdown(
+                    f"""
+                    <div style="
+                        background:#0f0f0f;
+                        border:1px solid #2a0a0a;
+                        border-radius:2px;
+                        padding:8px 12px;
+                        margin-bottom:8px;
+                    ">
+                        <p style="color:#888;font-size:0.75rem;margin:0 0 4px 0;
+                                  font-family:'Courier New',monospace;">
+                            {date_str}
+                        </p>
+                        <p style="color:#E5E5E5;font-size:0.85rem;margin:0 0 4px 0;
+                                  font-family:'Georgia',serif;">
+                            {domain_icon} {domain_name}
+                        </p>
+                        <p style="color:#B91C1C;font-size:0.8rem;margin:0;
+                                  font-family:'Courier New',monospace;">
+                            Consistency: {consistency}/10
+                        </p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.markdown("### 📚 Your Past Sessions")
+            st.markdown(
+                '<div style="color:#888;font-family:Courier New,monospace;font-size:0.8rem;'
+                'padding:4px 0;">No sessions recorded yet.</div>',
+                unsafe_allow_html=True,
+            )
+        
         st.divider()
         if st.button("🔄 Start New Session", use_container_width=True):
             _reset()
@@ -191,7 +300,11 @@ def _phase_input() -> None:
 
     selected_domain = st.session_state.get("selected_domain")
     if not selected_domain:
-        st.info("Select a domain above to continue.")
+        st.markdown(
+            '<div style="color:#888;font-family:Courier New,monospace;font-size:0.8rem;'
+            'padding:4px 0;">Select a domain above to continue.</div>',
+            unsafe_allow_html=True,
+        )
         return   # gate: nothing below renders until a domain is chosen
 
     st.divider()
@@ -258,36 +371,111 @@ def _phase_questioning() -> None:
             None,
         )
         if targeted:
-            st.caption(f"Targeting claim [{targeted.id}]: _{targeted.statement}_")
+            st.markdown(
+                f'<p style="color:#888;font-family:Courier New,monospace;font-size:0.8rem;'
+                f'margin:0 0 16px 0;">Targeting claim [{targeted.id}]: <em>{targeted.statement}</em></p>',
+                unsafe_allow_html=True,
+            )
 
     # The question — label uses domain persona name
     from src.domains import DOMAINS
     domain_key = st.session_state.get("selected_domain", "legal")
     persona_label = DOMAINS.get(domain_key, {}).get("display_name", "OPPOSING COUNSEL").upper()
 
+    # Question display with objection button
+    col_q, col_obj = st.columns([14, 1])
+    with col_q:
+        st.markdown(
+            f"""
+            <div style="
+                background:#1a0505;
+                border-left:4px solid #B91C1C;
+                border-radius:2px;
+                padding:18px 22px;
+                margin-bottom:0;
+            ">
+                <p style="color:#888;font-size:0.78rem;margin:0 0 6px 0;
+                          font-family:'Courier New',monospace;letter-spacing:0.08em;">
+                    {persona_label} — ROUND {rn}
+                </p>
+                <p style="color:#f0f0f0;font-size:1.1rem;margin:0;font-style:italic;
+                          font-family:'Georgia',serif;">
+                    &ldquo;{q.question}&rdquo;
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    
+    with col_obj:
+        st.markdown("<div style='height:32px;'></div>", unsafe_allow_html=True)  # Spacer for alignment
+        if st.button("⚡", key=f"objection_r{rn}", help="Flag this question as unfair"):
+            # Add objection to history display
+            st.session_state.history_display.append({
+                "q": q.question,
+                "a": "[OBJECTION]",
+                "contradiction_found": False,
+                "explanation": "Question flagged as unfair by user",
+                "flagged_unfair": True,
+            })
+            st.success("Objection noted — this question won't count against your score.")
+            
+            # Generate next question and move on
+            with st.spinner("Generating next question…"):
+                try:
+                    from src.nodes.questioner import generate_question
+                    next_q = generate_question(session.claims, session.history, session.domain)
+                    session.current_question = next_q
+                    session.round_number += 1
+                    st.session_state.current_question = next_q
+                    st.session_state.round_number = session.round_number
+                    
+                    if session.round_number > MAX_ROUNDS:
+                        st.session_state.phase = "scorecard_ready"
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error generating next question: {e}")
+
+    st.markdown("<div style='height:20px;'></div>", unsafe_allow_html=True)  # Spacer
+
+    # "Why this question?" expander
+    if session.claims:
+        targeted = next(
+            (c for c in session.claims.claims if c.id == q.targets_claim_id),
+            None,
+        )
+        if targeted:
+            with st.expander("Why this question?"):
+                st.markdown(
+                    f"""
+                    <div style="
+                        background:#111111;
+                        border:1px solid #2a0a0a;
+                        border-radius:2px;
+                        padding:12px 16px;
+                    ">
+                        <p style="color:#888;font-size:0.75rem;margin:0 0 8px 0;
+                                  font-family:'Courier New',monospace;">
+                            TARGETING CLAIM [{targeted.id}]
+                        </p>
+                        <p style="color:#E5E5E5;font-size:0.9rem;margin:0 0 8px 0;
+                                  font-style:italic;font-family:'Georgia',serif;">
+                            "{targeted.statement}"
+                        </p>
+                        <p style="color:#B91C1C;font-size:0.85rem;margin:0;
+                                  font-family:'Courier New',monospace;">
+                            ⚠ POTENTIAL WEAKNESS: {targeted.potential_weakness}
+                        </p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
     st.markdown(
-        f"""
-        <div style="
-            background:#1a0505;
-            border-left:4px solid #B91C1C;
-            border-radius:2px;
-            padding:18px 22px;
-            margin-bottom:16px;
-        ">
-            <p style="color:#888;font-size:0.78rem;margin:0 0 6px 0;
-                      font-family:'Courier New',monospace;letter-spacing:0.08em;">
-                {persona_label} — ROUND {rn}
-            </p>
-            <p style="color:#f0f0f0;font-size:1.1rem;margin:0;font-style:italic;
-                      font-family:'Georgia',serif;">
-                &ldquo;{q.question}&rdquo;
-            </p>
-        </div>
-        """,
+        '<p style="color:#E5E5E5;font-family:Georgia,serif;font-size:1.1rem;'
+        'margin:24px 0 12px 0;"><strong>Your answer:</strong></p>',
         unsafe_allow_html=True,
     )
-
-    st.markdown("**Your answer:**")
     answer_text = _audio_input_widget(f"answer_r{rn}")
 
     if answer_text:
@@ -339,8 +527,16 @@ def _phase_scorecard_ready() -> None:
             st.success(f"✓ **Consistent** — {cr.explanation}")
 
     st.divider()
-    st.markdown("### All rounds complete.")
-    st.markdown("Review the interrogation record in the sidebar, then generate the final scorecard.")
+    st.markdown(
+        '<h3 style="color:#E5E5E5;font-family:Georgia,serif;font-size:1.5rem;'
+        'margin:0 0 12px 0;">All rounds complete.</h3>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<p style="color:#E5E5E5;font-family:Courier New,monospace;font-size:0.93rem;'
+        'margin:0 0 16px 0;">Review the interrogation record in the sidebar, then generate the final scorecard.</p>',
+        unsafe_allow_html=True,
+    )
 
     if st.button("📊 Generate Scorecard", type="primary", use_container_width=True):
         session: CrossExamSession = st.session_state.session
@@ -349,6 +545,21 @@ def _phase_scorecard_ready() -> None:
                 scorecard = generate_scorecard(session.get_history())
                 st.session_state.scorecard = scorecard
                 st.session_state.phase = "scorecard"
+                
+                # Save session to local history
+                from src.schemas import ScorecardResult
+                session_record = {
+                    "domain": st.session_state.get("selected_domain", "legal"),
+                    "timestamp": datetime.now().isoformat(),
+                    "final_scorecard": {
+                        "consistency_score": scorecard.consistency_score,
+                        "evasiveness_score": scorecard.evasiveness_score,
+                        "contradictions": scorecard.contradictions,
+                        "summary": scorecard.summary,
+                    },
+                }
+                save_session(session_record)
+                
                 st.rerun()
             except ScorecardError as e:
                 st.error(f"Scorecard generation failed: {e}")
@@ -385,19 +596,41 @@ def _phase_scorecard() -> None:
     st.divider()
 
     # Contradictions
-    st.subheader(f"Contradictions ({len(sc.contradictions)})")
+    st.markdown(
+        f'<h3 style="color:#E5E5E5;font-family:Georgia,serif;font-size:1.2rem;'
+        f'margin:0 0 16px 0;">Contradictions ({len(sc.contradictions)})</h3>',
+        unsafe_allow_html=True,
+    )
     if sc.contradictions:
         for i, item in enumerate(sc.contradictions, 1):
             with st.expander(f"Contradiction {i}", expanded=True):
-                st.warning(item)
+                st.markdown(
+                    f'<div style="color:#E5E5E5;font-family:Courier New,monospace;'
+                    f'font-size:0.9rem;line-height:1.6;padding:4px 0;">{item}</div>',
+                    unsafe_allow_html=True,
+                )
     else:
-        st.success("No contradictions found across all rounds.")
+        st.markdown(
+            '<div style="color:#166534;font-family:Courier New,monospace;font-size:0.9rem;'
+            'padding:8px 12px;background:#0a1f0a;border-left:3px solid #166534;'
+            'border-radius:2px;">No contradictions found across all rounds.</div>',
+            unsafe_allow_html=True,
+        )
 
     st.divider()
 
     # Summary
-    st.subheader("Overall Assessment")
-    st.info(sc.summary)
+    st.markdown(
+        '<h3 style="color:#E5E5E5;font-family:Georgia,serif;font-size:1.2rem;'
+        'margin:0 0 16px 0;">Overall Assessment</h3>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f'<div style="color:#E5E5E5;font-family:Courier New,monospace;font-size:0.9rem;'
+        f'line-height:1.6;padding:12px 16px;background:#0f1a2a;border-left:3px solid #1d4ed8;'
+        f'border-radius:2px;">{sc.summary}</div>',
+        unsafe_allow_html=True,
+    )
 
     st.divider()
     if st.button("🔄 Start New Session", type="primary", use_container_width=True):
